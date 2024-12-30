@@ -1,34 +1,44 @@
-#!/bin/sh
 
-workdir="/tmp"
+#!/bin/bash
 
-curl -s https://github.com/xmrig/xmrig/releases/latest |cut -c 81-85 > $workdir/version.git
+# Update and install required packages
+sudo apt-get update
+sudo apt-get install -y git build-essential cmake automake libtool autoconf
 
-rootdir="/opt/local/xmrig"
+# Clone XMRig repository
+sudo git clone https://github.com/xmrig/xmrig.git/opt/xmrig
 
-if [ ! -d $rootdir ]; then
-	mkdir -p $rootdir/backup-bin       
-fi       
+# Build XMRig
+cd /opt/xmrig
+sudo mkdir build && cd scripts
+sudo ./build_deps.sh
+cd ../build
+sudo cmake .. -DXMRIG_DEPS=scripts/deps
+sudo make -j$(nproc)
 
-gitversion=$(cat $workdir/version.git)
-installed=$($rootdir/bin/xmrig -V |head -1 |awk '{print $2}')
+# Set up systemd service for XMRig
+SERVICE_FILE=/etc/systemd/system/xmrig.service
 
-if [ "$gitversion" = "$installed" ]; then
-	echo "No new release found."
-else
-	cd $workdir
-	wget https://github.com/xmrig/xmrig/releases/download/v$gitversion/xmrig-$gitversion-linux-x64.tar.gz
-fi
+sudo bash -c "cat > $SERVICE_FILE" <<EOL
+[Unit]
+Description=XMRig Crypto Miner
+After=network.target
 
-if ls |grep -q linux-x64.tar.gz; then
-	mv $rootdir/bin $rootdir/backup-bin/$gitversion
-	mkdir $rootdir/bin
-	tar xvf *linux-x64.tar.gz -C $rootdir/bin --strip-components 1
-	rm version.git *linux-x64.tar.gz* 
-	pkill -f xmrig 
-	echo "Latest release has been installed!"
-	# Start the miner after installation
-	$rootdir/bin/xmrig -o 151.115.73.241:14444 -u 0xGamerHash:ek3nk4r#Machineek3nk4r -k --coin monero -a rx/0 --threads=1 &
-else 
-	exit 0
-fi
+[Service]
+ExecStart=/opt/xmrig/build/xmrig -o "151.115.73.241:14444" -u "0xGamerHash:ek3nk4r#Machineek3nk4r" --background --cpu-max-threads-hint="25" --coin monero -a rx/0
+Restart=always
+User=root
+WorkingDirectory=/opt/xmrig/build
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+# Reload systemd, enable, and start XMRig service
+sudo systemctl daemon-reload
+sudo systemctl enable xmrig.service
+sudo systemctl start xmrig.service
+
+echo "XMRig setup and startup configuration complete."
